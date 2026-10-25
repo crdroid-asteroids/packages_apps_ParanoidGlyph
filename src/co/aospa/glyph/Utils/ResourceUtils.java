@@ -16,6 +16,7 @@
 
 package co.aospa.glyph.Utils;
 
+import android.app.ActivityThread;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
@@ -58,6 +59,10 @@ public final class ResourceUtils {
 
     private static Context getContext() {
         if (context == null) {
+            if (Constants.CONTEXT == null) {
+                // Services can be started before the boot receiver after the process restarts
+                Constants.CONTEXT = ActivityThread.currentApplication();
+            }
             context = Constants.CONTEXT;
             if (context == null) {
                 throw new IllegalStateException("Constants.CONTEXT is not initialized");
