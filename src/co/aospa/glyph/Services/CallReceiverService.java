@@ -19,11 +19,13 @@ package co.aospa.glyph.Services;
 import android.content.Intent;
 import android.database.Cursor;
 import android.media.AudioManager;
+import android.media.AudioSystem;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.ContactsContract;
 import android.telecom.Call;
 import android.telecom.InCallService;
@@ -39,6 +41,7 @@ public class CallReceiverService extends InCallService {
 
     private static final String TAG = "GlyphCallReceiverService";
     private static final boolean DEBUG = true;
+    private static final long RINGTONE_WAIT_MS = 1500;
 
     private AudioManager mAudioManager;
 
@@ -51,6 +54,7 @@ public class CallReceiverService extends InCallService {
     private final Runnable playCall = new Runnable() {
         @Override
         public void run() {
+            waitForRingtone();
             if (contactId != 0
                     && SettingsManager.contactHasGlyphCallConfig(contactId)) {
                 AnimationManager.playCall(
@@ -172,6 +176,28 @@ public class CallReceiverService extends InCallService {
             contactId = 0;
         }
 
+    }
+
+    // Telecom starts the ringtone a bit after the call shows up and the sound reaches the speaker
+    // later still, so start the lights when the ring stream is really playing plus the output latency
+    private void waitForRingtone() {
+        if (mAudioManager.getRingerMode() != AudioManager.RINGER_MODE_NORMAL
+                || mAudioManager.getStreamVolume(AudioManager.STREAM_RING) == 0) {
+            return;
+        }
+        final long start = SystemClock.uptimeMillis();
+        final long deadline = start + RINGTONE_WAIT_MS;
+        while (!AudioSystem.isStreamActive(AudioSystem.STREAM_RING, 0)) {
+            if (SystemClock.uptimeMillis() >= deadline) {
+                if (DEBUG) Log.d(TAG, "Ringtone did not start, playing anyway");
+                return;
+            }
+            SystemClock.sleep(2);
+        }
+        final int latency = mAudioManager.getOutputLatency(AudioManager.STREAM_RING);
+        if (DEBUG) Log.d(TAG, "Ringtone started after " + (SystemClock.uptimeMillis() - start)
+                + "ms, output latency " + latency + "ms");
+        if (latency > 0) SystemClock.sleep(latency);
     }
 
     private void enableCallAnimation() {

@@ -18,6 +18,7 @@ package co.aospa.glyph.Manager;
 
 import android.content.Context;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.util.Log;
 
 import com.android.internal.util.ArrayUtils;
@@ -67,6 +68,8 @@ public final class AnimationManager {
         ExecutorService executorService = Executors.newSingleThreadExecutor();
         return executorService.submit(runnable);
     }
+
+    private static final long FRAME_NS = 16666667L;
 
     private static boolean check(String name, boolean wait) {
         if (DEBUG) Log.d(TAG, "Playing animation | name: " + name + " | waiting: " + Boolean.toString(wait));
@@ -372,6 +375,11 @@ public final class AnimationManager {
 
         StatusManager.setCallLedActive(true);
 
+        // Pace frames against the clock so the lights stay with the ringtone: writing a frame takes
+        // a couple of ms, sleeping a fixed 16.6ms after it made the animation fall behind every loop
+        final long start = SystemClock.elapsedRealtimeNanos();
+        long frame = 0;
+
         while (StatusManager.isCallLedEnabled()) {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(
                     ResourceUtils.getCallAnimation(name)))) {
@@ -379,13 +387,16 @@ public final class AnimationManager {
                 while (it.hasNext()) {
                     if (checkInterruption("call")) throw new InterruptedException();
                     String[] pattern = it.next().split(",");
-                    if (ArrayUtils.contains(Constants.getSupportedAnimationPatternLengths(), pattern.length)) {
-                        updateLedFrame(pattern);
-                    } else {
+                    if (!ArrayUtils.contains(Constants.getSupportedAnimationPatternLengths(), pattern.length)) {
                         if (DEBUG) Log.d(TAG, "Animation line length mismatch | name: " + name + " | line: " + it.next());
                         throw new InterruptedException();
                     }
-                    Thread.sleep(16, 666000);
+                    long due = start + frame++ * FRAME_NS;
+                    // Running late, drop the frame instead of drifting
+                    if (SystemClock.elapsedRealtimeNanos() - due >= FRAME_NS) continue;
+                    updateLedFrame(pattern);
+                    long wait = start + frame * FRAME_NS - SystemClock.elapsedRealtimeNanos();
+                    if (wait > 0) Thread.sleep(wait / 1000000, (int) (wait % 1000000));
                 }
             } catch (Exception e) {
                 if (DEBUG) Log.d(TAG, "Exception while playing animation | name: " + name + " | exception: " + e);
